@@ -12,6 +12,8 @@ interface Dimensions {
   height: number
 }
 
+type FileData = string | Uint8Array | ArrayBuffer
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     // Only allow POST requests
@@ -51,8 +53,8 @@ export default {
             }
           })
         } else {
-          const image = await convertSVGtoPNG(svgText)
-          return new Response(image, {
+          const png = await convertSVGtoPNG(svgText)
+          return new Response(png, {
             headers: {
               'Content-Type': 'image/png',
               'Content-Disposition': 'attachment; filename="converted.png"'
@@ -91,26 +93,30 @@ export default {
   }
 }
 
-function isAnimatedSVG(svgText: string): boolean {
-  // Check for SMIL animation elements
-  const animationElements = ['<animate', '<animateTransform', '<animateMotion', '<set']
-  return animationElements.some(element => svgText.includes(element))
-}
-
 function getSVGDimensions(svgText: string): Dimensions {
-  const parser = new DOMParser()
-  const doc = parser.parseFromString(svgText, 'image/svg+xml')
-  const svgElement = doc.documentElement
+  // Default dimensions
+  let width = 800
+  let height = 600
 
-  // Get width and height from viewBox or width/height attributes
-  const viewBox = svgElement.getAttribute('viewBox')
-  if (viewBox) {
-    const [, , width, height] = viewBox.split(' ').map(Number)
-    return { width, height }
+  // Try to find viewBox
+  const viewBoxMatch = svgText.match(/viewBox="([^"]+)"/)
+  if (viewBoxMatch) {
+    const [, viewBox] = viewBoxMatch
+    const [, , w, h] = viewBox.split(' ').map(Number)
+    width = w
+    height = h
+  } else {
+    // Try to find width and height attributes
+    const widthMatch = svgText.match(/width="([^"]+)"/)
+    const heightMatch = svgText.match(/height="([^"]+)"/)
+
+    if (widthMatch) {
+      width = parseFloat(widthMatch[1])
+    }
+    if (heightMatch) {
+      height = parseFloat(heightMatch[1])
+    }
   }
-
-  const width = parseFloat(svgElement.getAttribute('width') || '800')
-  const height = parseFloat(svgElement.getAttribute('height') || '600')
 
   return { width, height }
 }
@@ -125,21 +131,27 @@ function getGIFDimensions(buffer: ArrayBuffer): Dimensions {
 
 async function convertSVGtoPNG(svgText: string): Promise<ArrayBuffer> {
   const dimensions = getSVGDimensions(svgText)
-  const img = new Image()
-  const canvas = new OffscreenCanvas(dimensions.width, dimensions.height)
-  const ctx = canvas.getContext('2d')
+  const ffmpeg = new FFmpeg()
 
-  return new Promise((resolve, reject) => {
-    img.onload = () => {
-      ctx?.drawImage(img, 0, 0, dimensions.width, dimensions.height)
-      canvas.convertToBlob({ type: 'image/png' })
-        .then(blob => blob.arrayBuffer())
-        .then(resolve)
-        .catch(reject)
-    }
-    img.onerror = reject
-    img.src = `data:image/svg+xml;base64,${btoa(svgText)}`
+  // Load FFmpeg
+  await ffmpeg.load({
+    coreURL: await toBlobURL(`/ffmpeg-core.js`, 'text/javascript'),
+    wasmURL: await toBlobURL(`/ffmpeg-core.wasm`, 'application/wasm'),
   })
+
+  // Create a temporary file with the SVG content
+  await ffmpeg.writeFile('input.svg', svgText)
+
+  // Convert SVG to PNG
+  await ffmpeg.exec([
+    '-i', 'input.svg',
+    '-vf', `scale=${dimensions.width}:${dimensions.height}`,
+    'output.png'
+  ])
+
+  // Read the output file
+  const data = await ffmpeg.readFile('output.png') as ArrayBuffer
+  return data
 }
 
 async function convertAnimatedSVGtoMP4(svgText: string): Promise<ArrayBuffer> {
@@ -155,7 +167,7 @@ async function convertAnimatedSVGtoMP4(svgText: string): Promise<ArrayBuffer> {
   // Create a temporary file with the SVG content
   await ffmpeg.writeFile('input.svg', svgText)
 
-  // Convert SVG to PNG sequence with original dimensions
+  // Convert SVG to PNG sequence
   await ffmpeg.exec([
     '-i', 'input.svg',
     '-vf', `scale=${dimensions.width}:${dimensions.height},fps=30`,
@@ -172,40 +184,33 @@ async function convertAnimatedSVGtoMP4(svgText: string): Promise<ArrayBuffer> {
   ])
 
   // Read the output file
-  const data = await ffmpeg.readFile('output.mp4')
+  const data = await ffmpeg.readFile('output.mp4') as ArrayBuffer
   return data
-}
-
-async function isAnimatedGIF(buffer: ArrayBuffer): Promise<boolean> {
-  // Check if the GIF has multiple frames by looking for the Graphic Control Extension
-  const view = new Uint8Array(buffer)
-  let pos = 13 // Skip header
-  while (pos < view.length) {
-    if (view[pos] === 0x21 && view[pos + 1] === 0xF9) {
-      return true // Found Graphic Control Extension
-    }
-    pos++
-  }
-  return false
 }
 
 async function convertGIFtoPNG(buffer: ArrayBuffer): Promise<ArrayBuffer> {
   const dimensions = getGIFDimensions(buffer)
-  const img = new Image()
-  const canvas = new OffscreenCanvas(dimensions.width, dimensions.height)
-  const ctx = canvas.getContext('2d')
+  const ffmpeg = new FFmpeg()
 
-  return new Promise((resolve, reject) => {
-    img.onload = () => {
-      ctx?.drawImage(img, 0, 0, dimensions.width, dimensions.height)
-      canvas.convertToBlob({ type: 'image/png' })
-        .then(blob => blob.arrayBuffer())
-        .then(resolve)
-        .catch(reject)
-    }
-    img.onerror = reject
-    img.src = `data:image/gif;base64,${btoa(String.fromCharCode(...new Uint8Array(buffer)))}`
+  // Load FFmpeg
+  await ffmpeg.load({
+    coreURL: await toBlobURL(`/ffmpeg-core.js`, 'text/javascript'),
+    wasmURL: await toBlobURL(`/ffmpeg-core.wasm`, 'application/wasm'),
   })
+
+  // Write the GIF file
+  await ffmpeg.writeFile('input.gif', new Uint8Array(buffer))
+
+  // Convert GIF to PNG
+  await ffmpeg.exec([
+    '-i', 'input.gif',
+    '-vf', `scale=${dimensions.width}:${dimensions.height}`,
+    'output.png'
+  ])
+
+  // Read the output file
+  const data = await ffmpeg.readFile('output.png') as ArrayBuffer
+  return data
 }
 
 async function convertGIFtoMP4(buffer: ArrayBuffer): Promise<ArrayBuffer> {
@@ -221,7 +226,7 @@ async function convertGIFtoMP4(buffer: ArrayBuffer): Promise<ArrayBuffer> {
   // Write the GIF file
   await ffmpeg.writeFile('input.gif', new Uint8Array(buffer))
 
-  // Convert GIF to MP4 with original dimensions
+  // Convert GIF to MP4
   await ffmpeg.exec([
     '-i', 'input.gif',
     '-movflags', 'faststart',
@@ -231,6 +236,24 @@ async function convertGIFtoMP4(buffer: ArrayBuffer): Promise<ArrayBuffer> {
   ])
 
   // Read the output file
-  const data = await ffmpeg.readFile('output.mp4')
+  const data = await ffmpeg.readFile('output.mp4') as ArrayBuffer
   return data
+}
+
+function isAnimatedSVG(svgText: string): boolean {
+  // Check for SMIL animation elements
+  const animationElements = ['<animate', '<animateTransform', '<animateMotion', '<set']
+  return animationElements.some(element => svgText.includes(element))
+}
+
+async function isAnimatedGIF(buffer: ArrayBuffer): Promise<boolean> {
+  const view = new Uint8Array(buffer)
+  let pos = 13 // Skip header
+  while (pos < view.length) {
+    if (view[pos] === 0x21 && view[pos + 1] === 0xF9) {
+      return true // Found Graphic Control Extension
+    }
+    pos++
+  }
+  return false
 }
