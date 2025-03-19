@@ -14,6 +14,7 @@ async function uploadToCloudinary(file: ArrayBuffer, format: string, env: Env): 
   formData.append('file', blob, `file.${format}`)
   formData.append('upload_preset', 'ml_default')
 
+
   const timestamp = Math.floor(Date.now() / 1000)
   const params = {
     timestamp,
@@ -64,70 +65,118 @@ async function generateSignature(params: Record<string, any>, env: Env): Promise
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
 }
 
+async function handleImageConversion(url: string, env: Env): Promise<Response> {
+  try {
+    const response = await fetch(url)
+    if (!response.ok) throw new Error('Failed to fetch image from URL')
+
+    const fileBuffer = await response.arrayBuffer()
+    const format = url.split('.').pop()?.toLowerCase() || ''
+
+    if (!['svg', 'gif'].includes(format)) {
+      return new Response('Unsupported file format', { status: 400 })
+    }
+
+    const uploadResult = await uploadToCloudinary(fileBuffer, format, env)
+
+    // Fetch the converted image
+    const imageResponse = await fetch(uploadResult.secure_url)
+    const imageBuffer = await imageResponse.arrayBuffer()
+
+    // Return the image directly
+    return new Response(imageBuffer, {
+      headers: {
+        'Content-Type': uploadResult.resource_type === 'video' ? 'video/mp4' : 'image/png',
+        'Access-Control-Allow-Origin': '*',
+      },
+    })
+  } catch (error: unknown) {
+    console.error('Error:', error)
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred'
+    return new Response(JSON.stringify({ error: errorMessage }), {
+      status: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+      },
+    })
+  }
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     if (request.method === 'OPTIONS') {
       return new Response(null, {
         headers: {
           'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'POST',
+          'Access-Control-Allow-Methods': 'GET, POST',
           'Access-Control-Allow-Headers': 'Content-Type',
         },
       })
     }
 
-    if (request.method !== 'POST') {
-      return new Response('Method not allowed', { status: 405 })
-    }
+    // Handle GET requests with URL parameter
+    if (request.method === 'GET') {
+      const url = new URL(request.url)
+      const imageUrl = url.searchParams.get('url')
 
-    try {
-      const formData = await request.formData()
-      let fileBuffer: ArrayBuffer
-      let format: string
-
-      if (formData.has('url')) {
-        const url = formData.get('url') as string
-        const response = await fetch(url)
-        if (!response.ok) throw new Error('Failed to fetch image from URL')
-        fileBuffer = await response.arrayBuffer()
-        format = url.split('.').pop()?.toLowerCase() || ''
-      } else if (formData.has('file')) {
-        const file = formData.get('file') as File
-        fileBuffer = await file.arrayBuffer()
-        format = file.name.split('.').pop()?.toLowerCase() || ''
-      } else {
-        return new Response('No file or URL provided', { status: 400 })
+      if (imageUrl) {
+        return handleImageConversion(imageUrl, env)
       }
 
-      if (!['svg', 'gif'].includes(format)) {
-        return new Response('Unsupported file format', { status: 400 })
-      }
-
-      // Upload to Cloudinary
-      const uploadResult = await uploadToCloudinary(fileBuffer, format, env)
-
-      // Return the converted file URL
-      return new Response(JSON.stringify({
-        url: uploadResult.secure_url,
-        format: uploadResult.format,
-        resource_type: uploadResult.resource_type
-      }), {
-        headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
-        },
-      })
-
-    } catch (error: unknown) {
-      console.error('Error:', error)
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred'
-      return new Response(JSON.stringify({ error: errorMessage }), {
-        status: 500,
-        headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
-        },
-      })
+      return new Response('Missing URL parameter', { status: 400 })
     }
+
+    // Handle POST requests
+    if (request.method === 'POST') {
+      try {
+        const formData = await request.formData()
+        let fileBuffer: ArrayBuffer
+        let format: string
+
+        if (formData.has('url')) {
+          const url = formData.get('url') as string
+          const response = await fetch(url)
+          if (!response.ok) throw new Error('Failed to fetch image from URL')
+          fileBuffer = await response.arrayBuffer()
+          format = url.split('.').pop()?.toLowerCase() || ''
+        } else if (formData.has('file')) {
+          const file = formData.get('file') as File
+          fileBuffer = await file.arrayBuffer()
+          format = file.name.split('.').pop()?.toLowerCase() || ''
+        } else {
+          return new Response('No file or URL provided', { status: 400 })
+        }
+
+        if (!['svg', 'gif'].includes(format)) {
+          return new Response('Unsupported file format', { status: 400 })
+        }
+
+        const uploadResult = await uploadToCloudinary(fileBuffer, format, env)
+
+        return new Response(JSON.stringify({
+          url: uploadResult.secure_url,
+          format: uploadResult.format,
+          resource_type: uploadResult.resource_type
+        }), {
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+          },
+        })
+      } catch (error: unknown) {
+        console.error('Error:', error)
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred'
+        return new Response(JSON.stringify({ error: errorMessage }), {
+          status: 500,
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+          },
+        })
+      }
+    }
+
+    return new Response('Method not allowed', { status: 405 })
   },
 }
