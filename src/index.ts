@@ -16,7 +16,23 @@ type FileData = string | Uint8Array | ArrayBuffer
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    // Only allow POST requests
+    // Handle FFmpeg core files requests
+    const url = new URL(request.url)
+    if (url.pathname === '/ffmpeg-core.js' || url.pathname === '/ffmpeg-core.wasm') {
+      const response = await fetch(`https://unpkg.com/@ffmpeg/core@0.12.4/dist${url.pathname}`)
+      if (!response.ok) {
+        return new Response('FFmpeg core file not found', { status: 404 })
+      }
+      const data = await response.arrayBuffer()
+      return new Response(data, {
+        headers: {
+          'Content-Type': url.pathname.endsWith('.js') ? 'text/javascript' : 'application/wasm',
+          'Access-Control-Allow-Origin': '*'
+        }
+      })
+    }
+
+    // Only allow POST requests for image conversion
     if (request.method !== 'POST') {
       return new Response('Method not allowed', { status: 405 })
     }
