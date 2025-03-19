@@ -8,18 +8,63 @@ interface CloudinaryResponse {
   resource_type: string
 }
 
-async function uploadToCloudinary(file: ArrayBuffer, format: string, env: Env): Promise<CloudinaryResponse> {
+interface CloudinaryUploadResult {
+  secure_url: string
+  public_id: string
+  format: string
+  resource_type: string
+}
+
+function isAnimatedSVG(svgContent: string): boolean {
+  const animationElements = [
+    '<animate',
+    '<animateMotion',
+    '<animateTransform',
+    '<set'
+  ]
+  return animationElements.some(element => svgContent.includes(element))
+}
+
+function isAnimatedGIF(buffer: ArrayBuffer): boolean {
+  const view = new Uint8Array(buffer)
+  let frames = 0
+  let pos = 0
+
+  // Check GIF header
+  if (view[0] !== 0x47 || view[1] !== 0x49 || view[2] !== 0x46) {
+    return false
+  }
+
+  pos += 13 // Skip header and logical screen descriptor
+
+  while (pos < view.length) {
+    if (view[pos] === 0x21 && view[pos + 1] === 0xF9) {
+      frames++
+      if (frames > 1) return true
+      pos += 8
+    } else if (view[pos] === 0x2C) {
+      pos += 11
+    } else {
+      pos++
+    }
+  }
+
+  return false
+}
+
+async function uploadToCloudinary(file: ArrayBuffer, format: string, isAnimated: boolean, env: Env): Promise<CloudinaryResponse> {
   const formData = new FormData()
   const blob = new Blob([file], { type: `image/${format}` })
   formData.append('file', blob, `file.${format}`)
   formData.append('upload_preset', 'ml_default')
-
+  formData.append('resource_type', 'auto')
 
   const timestamp = Math.floor(Date.now() / 1000)
   const params = {
     timestamp,
     upload_preset: 'ml_default',
     api_key: env.CLOUDINARY_API_KEY,
+    resource_type: 'auto'
   }
 
   const signature = await generateSignature(params, env)
@@ -40,7 +85,22 @@ async function uploadToCloudinary(file: ArrayBuffer, format: string, env: Env): 
     throw new Error(`Cloudinary upload failed: ${response.statusText} - ${errorText}`)
   }
 
-  return response.json()
+  const result = await response.json() as CloudinaryUploadResult
+
+  // Si es animado, convertir a MP4, si no, a PNG
+  if (isAnimated) {
+    return {
+      secure_url: result.secure_url.replace(/\.[^/.]+$/, '.mp4'),
+      format: 'mp4',
+      resource_type: 'video'
+    }
+  } else {
+    return {
+      secure_url: result.secure_url.replace(/\.[^/.]+$/, '.png'),
+      format: 'png',
+      resource_type: 'image'
+    }
+  }
 }
 
 async function generateSignature(params: Record<string, any>, env: Env): Promise<string> {
@@ -77,17 +137,27 @@ async function handleImageConversion(url: string, env: Env): Promise<Response> {
       return new Response('Unsupported file format', { status: 400 })
     }
 
-    const uploadResult = await uploadToCloudinary(fileBuffer, format, env)
+    // Check if the image is animated
+    let isAnimated = false
+    if (format === 'svg') {
+      const svgText = new TextDecoder().decode(fileBuffer)
+      isAnimated = isAnimatedSVG(svgText)
+    } else if (format === 'gif') {
+      isAnimated = isAnimatedGIF(fileBuffer)
+    }
 
-    // Fetch the converted image
-    const imageResponse = await fetch(uploadResult.secure_url)
-    const imageBuffer = await imageResponse.arrayBuffer()
+    const uploadResult = await uploadToCloudinary(fileBuffer, format, isAnimated, env)
 
-    // Return the image directly
-    return new Response(imageBuffer, {
+    // Fetch the converted image/video
+    const convertedResponse = await fetch(uploadResult.secure_url)
+    const convertedBuffer = await convertedResponse.arrayBuffer()
+
+    // Return the converted file directly
+    return new Response(convertedBuffer, {
       headers: {
-        'Content-Type': uploadResult.resource_type === 'video' ? 'video/mp4' : 'image/png',
+        'Content-Type': isAnimated ? 'video/mp4' : 'image/png',
         'Access-Control-Allow-Origin': '*',
+        'Content-Disposition': `inline; filename="converted.${isAnimated ? 'mp4' : 'png'}"`,
       },
     })
   } catch (error: unknown) {
@@ -152,12 +222,21 @@ export default {
           return new Response('Unsupported file format', { status: 400 })
         }
 
-        const uploadResult = await uploadToCloudinary(fileBuffer, format, env)
+        // Check if the image is animated
+        let isAnimated = false
+        if (format === 'svg') {
+          const svgText = new TextDecoder().decode(fileBuffer)
+          isAnimated = isAnimatedSVG(svgText)
+        } else if (format === 'gif') {
+          isAnimated = isAnimatedGIF(fileBuffer)
+        }
+
+        const uploadResult = await uploadToCloudinary(fileBuffer, format, isAnimated, env)
 
         return new Response(JSON.stringify({
           url: uploadResult.secure_url,
-          format: uploadResult.format,
-          resource_type: uploadResult.resource_type
+          format: isAnimated ? 'mp4' : 'png',
+          resource_type: isAnimated ? 'video' : 'image'
         }), {
           headers: {
             'Content-Type': 'application/json',
