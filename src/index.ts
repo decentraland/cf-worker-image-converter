@@ -22,22 +22,36 @@ export default {
     }
 
     try {
-      // Get the file from the request
+      // Get the data from the request
       const formData = await request.formData()
       const file = formData.get('file') as File
+      const imageUrl = formData.get('url') as string
 
-      if (!file) {
-        return new Response('No file provided', { status: 400 })
+      if (!file && !imageUrl) {
+        return new Response('No file or URL provided', { status: 400 })
+      }
+
+      let fileBuffer: ArrayBuffer
+      let fileType: string
+
+      if (imageUrl) {
+        // Fetch the image from the URL
+        const response = await fetch(imageUrl)
+        if (!response.ok) {
+          return new Response('Failed to fetch image from URL', { status: response.status })
+        }
+        fileBuffer = await response.arrayBuffer()
+        fileType = response.headers.get('content-type') || 'image/gif'
+      } else {
+        // Use the uploaded file
+        fileBuffer = await file.arrayBuffer()
+        fileType = file.type
       }
 
       // Check file type
-      const fileType = file.type
       if (!['image/svg+xml', 'image/gif'].includes(fileType)) {
         return new Response('Invalid file type. Only SVG and GIF files are supported.', { status: 400 })
       }
-
-      // Read the file content
-      const fileBuffer = await file.arrayBuffer()
 
       // For SVG files, check if animated and convert accordingly
       if (fileType === 'image/svg+xml') {
@@ -49,7 +63,8 @@ export default {
           return new Response(mp4, {
             headers: {
               'Content-Type': 'video/mp4',
-              'Content-Disposition': 'attachment; filename="converted.mp4"'
+              'Content-Disposition': 'attachment; filename="converted.mp4"',
+              'Access-Control-Allow-Origin': '*'
             }
           })
         } else {
@@ -57,7 +72,8 @@ export default {
           return new Response(png, {
             headers: {
               'Content-Type': 'image/png',
-              'Content-Disposition': 'attachment; filename="converted.png"'
+              'Content-Disposition': 'attachment; filename="converted.png"',
+              'Access-Control-Allow-Origin': '*'
             }
           })
         }
@@ -71,7 +87,8 @@ export default {
           return new Response(mp4, {
             headers: {
               'Content-Type': 'video/mp4',
-              'Content-Disposition': 'attachment; filename="converted.mp4"'
+              'Content-Disposition': 'attachment; filename="converted.mp4"',
+              'Access-Control-Allow-Origin': '*'
             }
           })
         } else {
@@ -79,7 +96,8 @@ export default {
           return new Response(png, {
             headers: {
               'Content-Type': 'image/png',
-              'Content-Disposition': 'attachment; filename="converted.png"'
+              'Content-Disposition': 'attachment; filename="converted.png"',
+              'Access-Control-Allow-Origin': '*'
             }
           })
         }
