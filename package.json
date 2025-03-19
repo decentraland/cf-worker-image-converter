@@ -9,8 +9,10 @@
     "build": "tsc"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20240208.0",
-    "typescript": "^5.3.3",
+    "@cloudflare/workers-types": "^4.20250317.0",
+    "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/util": "^0.12.2",
+    "typescript": "^5.8.2",
     "wrangler": "^3.28.1"
   }
 }
