@@ -6,7 +6,7 @@
     "deploy": "wrangler deploy",
     "dev": "wrangler dev",
     "start": "wrangler dev",
-    "build": "./node_modules/.bin/tsc"
+    "build": "tsc"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250317.0",
