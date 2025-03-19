@@ -69,6 +69,9 @@ async function uploadToCloudinary(file: ArrayBuffer, format: string, isAnimated:
 
   const signature = await generateSignature(params, env)
 
+  console.log(env.CLOUDINARY_API_KEY, env.CLOUDINARY_CLOUD_NAME, env.CLOUDINARY_API_SECRET)
+
+
   const url = `https://api.cloudinary.com/v1_1/${env.CLOUDINARY_CLOUD_NAME}/auto/upload`
   const response = await fetch(url, {
     method: 'POST',
