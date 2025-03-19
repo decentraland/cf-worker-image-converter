@@ -6,13 +6,15 @@
     "deploy": "wrangler deploy",
     "dev": "wrangler dev",
     "start": "wrangler dev",
-    "build": "tsc"
+    "build": "./node_modules/.bin/tsc"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250317.0",
-    "@ffmpeg/ffmpeg": "^0.12.15",
-    "@ffmpeg/util": "^0.12.2",
     "typescript": "^5.8.2",
     "wrangler": "^3.28.1"
+  },
+  "dependencies": {
+    "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/util": "^0.12.2"
   }
 }
