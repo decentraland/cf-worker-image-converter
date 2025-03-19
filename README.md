@@ -5,9 +5,9 @@ This Cloudflare Worker converts SVG and GIF files to PNG (for static images) or 
 ## Features
 
 - Convert static SVG files to PNG
-- Convert animated SVG files to MP4 (coming soon)
+- Convert animated SVG files to MP4
 - Convert static GIF files to PNG
-- Convert animated GIF files to MP4 (coming soon)
+- Convert animated GIF files to MP4
 
 ## Setup
 
@@ -34,7 +34,7 @@ curl -X POST -F "file=@your-file.svg" https://your-worker-url.workers.dev
 The worker will return:
 
 - PNG file for static SVG or static GIF inputs
-- MP4 file for animated SVG or animated GIF inputs (coming soon)
+- MP4 file for animated SVG or animated GIF inputs
 
 ## Development
 
